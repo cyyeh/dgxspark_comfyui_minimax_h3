@@ -50,7 +50,7 @@ bash deploy_from_scratch.sh
 ### Interactive Installer (Recommended)
 
 ```bash
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/install_wizard.py
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/install_wizard.py
 python3 install_wizard.py
 ```
 
@@ -341,7 +341,7 @@ bash deploy_from_scratch.sh
 ### 交互式安装（推荐）
 
 ```bash
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/install_wizard.py
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/install_wizard.py
 python3 install_wizard.py
 ```
 

@@ -274,9 +274,7 @@ def step_comfyui_and_nodes():
         src = tmp / src_part
         dst = cfg.cn_dir / "ComfyUI_sol-attn_Blackwell"
         if src.exists():
-            dst.mkdir(parents=True, exist_ok=True)
-            for f in src.iterdir():
-                shutil.copy2(f, dst / f.name)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
     ports_dir = cfg.cn_dir / "h3_sol_engine_ports"
     ports_dir.mkdir(parents=True, exist_ok=True)
     for py_file in ["h3_fbc_node.py", "h3_vae_batch.py"]:
