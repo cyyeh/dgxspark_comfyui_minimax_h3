@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import install_wizard
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRATCH_INSTALLER = ROOT / "deploy_from_scratch.sh"
@@ -160,6 +162,19 @@ exit "${FAKE_WGET_EXIT:-0}"
         self.assertNotRegex(lowered, r"resolve/(?:main|master)/")
         self.assertNotIn("huggingface-cli download", lowered)
         self.assertNotIn("huggingface_hub.cli.hf download", lowered)
+
+    def test_shell_manifest_matches_interactive_installer(self):
+        source = SCRATCH_INSTALLER.read_text()
+        self.assertIn(install_wizard.HF_BASE_REPO, source)
+        self.assertIn(install_wizard.HF_BASE_REVISION, source)
+        self.assertIn(install_wizard.HF_EXTRA_REPO, source)
+        self.assertIn(install_wizard.HF_EXTRA_REVISION, source)
+        for relative_path, expected_size in {
+            **install_wizard.HF_BASE_MANIFEST,
+            **install_wizard.HF_EXTRA_MANIFEST,
+        }.items():
+            with self.subTest(relative_path=relative_path):
+                self.assertIn(f'"{relative_path}" {expected_size}', source)
 
 
 class CloneInstallerTests(unittest.TestCase):
