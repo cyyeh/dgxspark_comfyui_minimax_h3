@@ -103,6 +103,8 @@ class HuggingFaceDownloadTests(unittest.TestCase):
 
         def finish_download(command, **kwargs):
             self.assertIn("--continue", command)
+            self.assertIn("--tries=10", command)
+            self.assertNotIn("--tries=0", command)
             self.assertNotIn("complete.bin", command[-1])
             self.assertTrue(command[-1].endswith("/partial.bin"))
             self.assertIsNone(kwargs["timeout"])

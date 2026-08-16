@@ -45,7 +45,10 @@ quarantine_model_path() {
         candidate="${path}.invalid.${index}"
         index=$((index + 1))
     done
-    mv "$path" "$candidate"
+    if ! mv "$path" "$candidate"; then
+        warn "无法隔离异常文件: $path"
+        return 2
+    fi
     warn "隔离异常文件: $(basename "$path") → $(basename "$candidate")"
 }
 
@@ -54,15 +57,21 @@ prepare_model_path() {
 
     if [ -L "$path" ]; then
         if [ ! -e "$path" ]; then
-            quarantine_model_path "$path"
+            quarantine_model_path "$path" || return 2
             return 1
         fi
-        actual_size=$(file_size "$path")
+        if ! actual_size=$(file_size "$path"); then
+            warn "无法读取模型大小: $path"
+            return 2
+        fi
         if [ "$actual_size" -gt "$expected_size" ]; then
-            quarantine_model_path "$path"
+            quarantine_model_path "$path" || return 2
             return 1
         fi
-        temporary=$(mktemp "$(dirname "$path")/$(basename "$path").materializing.XXXXXX")
+        if ! temporary=$(mktemp "$(dirname "$path")/$(basename "$path").materializing.XXXXXX"); then
+            warn "无法创建模型实体化临时文件: $path"
+            return 2
+        fi
         if ! cp "$path" "$temporary"; then
             rm -f "$temporary"
             warn "无法实体化旧模型链接: $path"
@@ -76,9 +85,12 @@ prepare_model_path() {
     fi
 
     [ -f "$path" ] || return 1
-    actual_size=$(file_size "$path")
+    if ! actual_size=$(file_size "$path"); then
+        warn "无法读取模型大小: $path"
+        return 2
+    fi
     if [ "$actual_size" -gt "$expected_size" ]; then
-        quarantine_model_path "$path"
+        quarantine_model_path "$path" || return 2
         return 1
     fi
     [ "$actual_size" -eq "$expected_size" ]
@@ -87,8 +99,14 @@ prepare_model_path() {
 download_hf_file() {
     local repo_id="$1" revision="$2" relative_path="$3" expected_size="$4"
     local destination="${MODEL_DIR}/${relative_path}" destination_dir status actual_size
-    destination_dir=$(dirname "$destination")
-    mkdir -p "$destination_dir"
+    if ! destination_dir=$(dirname "$destination"); then
+        warn "无法解析模型目录: $destination"
+        return 1
+    fi
+    if ! mkdir -p "$destination_dir"; then
+        warn "无法创建模型目录: $destination_dir"
+        return 1
+    fi
 
     if prepare_model_path "$destination" "$expected_size"; then
         info "已安装，跳过: ${relative_path}"
@@ -100,8 +118,8 @@ download_hf_file() {
 
     info "下载/续传: ${relative_path}"
     if ! (
-        cd "$destination_dir"
-        wget --continue --tries=0 --timeout=60 --read-timeout=60 \
+        cd "$destination_dir" || exit 1
+        wget --continue --tries=10 --timeout=60 --read-timeout=60 \
             "https://huggingface.co/${repo_id}/resolve/${revision}/${relative_path}"
     ); then
         warn "下载中断: ${relative_path}；请重新运行安装程序以从现有文件续传"
@@ -112,7 +130,10 @@ download_hf_file() {
         warn "下载完成但找不到文件: ${relative_path}；请重新运行以续传"
         return 1
     fi
-    actual_size=$(file_size "$destination")
+    if ! actual_size=$(file_size "$destination"); then
+        warn "无法读取下载文件大小: ${relative_path}"
+        return 1
+    fi
     if [ "$actual_size" -ne "$expected_size" ]; then
         warn "下载完成但大小不符: ${relative_path}（预期 ${expected_size}，实际 ${actual_size}）；请重新运行以续传"
         return 1

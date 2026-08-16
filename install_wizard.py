@@ -289,7 +289,7 @@ def download_hf_group(repo_id, revision, manifest, label):
             [
                 "wget",
                 "--continue",
-                "--tries=0",
+                "--tries=10",
                 "--timeout=60",
                 "--read-timeout=60",
                 url,

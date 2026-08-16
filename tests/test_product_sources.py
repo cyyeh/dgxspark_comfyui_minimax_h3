@@ -45,6 +45,7 @@ class ProductSourceTests(unittest.TestCase):
                 self.assertNotRegex(source, r"resolve/(?:main|master)/")
                 self.assertNotIn("huggingface-cli download", source)
                 self.assertNotIn("huggingface_hub.cli.hf download", source)
+                self.assertNotIn("--tries=0", source)
 
 
 if __name__ == "__main__":

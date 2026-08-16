@@ -26,7 +26,9 @@ class ScratchInstallerDownloadTests(unittest.TestCase):
             """#!/bin/bash
 url="${@: -1}"
 filename="${url##*/}"
-printf '%s' "${FAKE_WGET_DATA:-}" >> "$filename"
+if [ "${FAKE_WGET_NO_WRITE:-0}" != "1" ]; then
+    printf '%s' "${FAKE_WGET_DATA:-}" >> "$filename"
+fi
 printf '%s\n' "$*" >> "$FAKE_WGET_LOG"
 exit "${FAKE_WGET_EXIT:-0}"
 """
@@ -58,7 +60,7 @@ exit "${FAKE_WGET_EXIT:-0}"
             [
                 "bash",
                 "-c",
-                'source "$1"; download_hf_file "$2" "$3" "$4" "$5"',
+                'source "$1"; download_hf_file "$2" "$3" "$4" "$5" || exit $?',
                 "bash",
                 str(SCRATCH_INSTALLER),
                 "org/repo",
@@ -94,6 +96,8 @@ exit "${FAKE_WGET_EXIT:-0}"
         calls = self.log.read_text().splitlines()
         self.assertEqual(len(calls), 1)
         self.assertIn("--continue", calls[0])
+        self.assertIn("--tries=10", calls[0])
+        self.assertNotIn("--tries=0", calls[0])
         self.assertIn("/resolve/" + "a" * 40 + "/nested/model.bin", calls[0])
 
     def test_partial_symlink_is_materialized_before_resume(self):
@@ -155,6 +159,65 @@ exit "${FAKE_WGET_EXIT:-0}"
         self.assertIn("重新运行", result.stdout + result.stderr)
         self.assertIn("续传", result.stdout + result.stderr)
 
+    def test_directory_creation_failure_never_invokes_wget(self):
+        blocker = self.root / "blocker"
+        blocker.write_text("not a directory")
+
+        result = self.run_download(
+            "model.bin",
+            5,
+            MODEL_DIR=str(blocker / "models"),
+            FAKE_WGET_DATA="fresh",
+            FAKE_WGET_NO_WRITE="1",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
+
+    def test_failed_quarantine_never_invokes_wget(self):
+        model = self.model_dir / "model.bin"
+        model.write_bytes(b"oversized")
+        fake_mv = self.bin_dir / "mv"
+        fake_mv.write_text("#!/bin/bash\nexit 1\n")
+        fake_mv.chmod(0o755)
+
+        result = self.run_download(
+            "model.bin",
+            7,
+            FAKE_WGET_DATA="correct",
+            FAKE_WGET_NO_WRITE="1",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(model.read_bytes(), b"oversized")
+        self.assertFalse(self.log.exists())
+
+    def test_materialization_copy_failure_keeps_symlink_and_cleans_temp(self):
+        target = self.root / "legacy.bin"
+        target.write_bytes(b"part")
+        model = self.model_dir / "model.bin"
+        model.symlink_to(target)
+        fake_cp = self.bin_dir / "cp"
+        fake_cp.write_text("#!/bin/bash\nexit 1\n")
+        fake_cp.chmod(0o755)
+
+        result = self.run_download("model.bin", 7, FAKE_WGET_DATA="ial")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(model.is_symlink())
+        self.assertEqual(target.read_bytes(), b"part")
+        self.assertEqual(list(self.model_dir.glob("model.bin.materializing.*")), [])
+        self.assertFalse(self.log.exists())
+
+    def test_wrong_post_download_size_is_rejected(self):
+        model = self.model_dir / "model.bin"
+
+        result = self.run_download("model.bin", 7, FAKE_WGET_DATA="short")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(model.read_bytes(), b"short")
+        self.assertIn("大小不符", result.stdout + result.stderr)
+
     def test_product_shell_scripts_have_no_modelscope_or_unpinned_downloads(self):
         combined = SCRATCH_INSTALLER.read_text() + CLONE_INSTALLER.read_text()
         lowered = combined.lower()
@@ -162,6 +225,7 @@ exit "${FAKE_WGET_EXIT:-0}"
         self.assertNotRegex(lowered, r"resolve/(?:main|master)/")
         self.assertNotIn("huggingface-cli download", lowered)
         self.assertNotIn("huggingface_hub.cli.hf download", lowered)
+        self.assertNotIn("--tries=0", lowered)
 
     def test_shell_manifest_matches_interactive_installer(self):
         source = SCRATCH_INSTALLER.read_text()

@@ -171,7 +171,7 @@ def download_hf_group(repo_id, revision, manifest, label):
         destination = cfg.model_dir / relative
         url = f"https://huggingface.co/{repo_id}/resolve/{revision}/{relative}"
         result = run(
-            ["wget", "--continue", "--tries=0", "--timeout=60", "--read-timeout=60", url],
+            ["wget", "--continue", "--tries=10", "--timeout=60", "--read-timeout=60", url],
             cwd=str(destination.parent), timeout=None, check=False,
         )
         if result is None or result.returncode != 0:

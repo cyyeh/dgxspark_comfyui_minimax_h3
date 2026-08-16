@@ -57,7 +57,7 @@ Before showing a download confirmation or invoking Hugging Face, each stage chec
 5. Complete files are never passed to Wget, even when another file in the same stage is missing.
 6. A stage with no missing files returns before prompting or starting a subprocess.
 
-Each URL uses the repository's pinned revision and Hugging Face `resolve` endpoint. The Hugging Face CDN advertises byte-range support, and GNU Wget's `--continue` retains a partial destination and requests only the remaining byte range on the next run. Downloads receive no whole-process timeout. A destination larger than its manifest entry is quarantined before retry because it cannot be a valid prefix. After Wget returns, the installer checks the manifest again. Any missing or wrong-size file stops the installation with a precise error and does not create a completion marker.
+Each URL uses the repository's pinned revision and Hugging Face `resolve` endpoint. The Hugging Face CDN advertises byte-range support, and GNU Wget's `--continue` retains a partial destination and requests only the remaining byte range on the next run. Downloads receive no whole-process timeout, while Wget uses a finite retry count so a persistent outage returns clear rerun guidance. A destination larger than its manifest entry is quarantined before retry because it cannot be a valid prefix. After Wget returns, the installer checks the manifest again. Any missing or wrong-size file stops the installation with a precise error and does not create a completion marker.
 
 Completion-marker files are no longer authoritative. Exact final-file validation is performed on every run, so a stale marker cannot hide missing data and an absent marker cannot cause a complete model to download again.
 

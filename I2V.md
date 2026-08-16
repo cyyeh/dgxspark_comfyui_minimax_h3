@@ -125,7 +125,7 @@ python3 install_wizard.py
 export http_proxy=http://PROXY:port; export https_proxy=$http_proxy
 mkdir -p ComfyUI/models/diffusion_models
 cd ComfyUI/models/diffusion_models
-wget --continue --tries=0 --timeout=60 --read-timeout=60 \
+wget --continue --tries=10 --timeout=60 --read-timeout=60 \
   https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights/resolve/2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 ```
 

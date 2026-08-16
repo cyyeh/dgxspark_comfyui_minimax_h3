@@ -541,7 +541,7 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
     ├── ComfyUI/
     │   ├── models/
     │   │   ├── diffusion_models/  # 2 个文件
-    │   │   ├── text_encoders/     # + H3/ 软链接
+    │   │   ├── text_encoders/     # 包含 H3/
     │   │   ├── vae/               # 2 个文件
     │   │   └── upscale_models/    # 2 个文件
     │   ├── custom_nodes/          # 8 个节点
