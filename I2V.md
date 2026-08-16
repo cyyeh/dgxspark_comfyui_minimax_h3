@@ -105,74 +105,29 @@ cond = node_helpers.conditioning_set_values(cond, {
 
 ## 4. 下载方式（统一）
 
-### 4.1 ModelScope（国内直连，推荐）
-
-官方 `Comfy-Org/MiniMax-H3` 仓库包含**完整模型**（diffusion + vae + text_encoders），国内无需代理、速度快（实测 30+ MB/s）。
-
-仓库完整文件清单（21 项）：
-
-```
-diffusion_models/
-├── minimax_h3_fl2va_pruned_int8_convrot.safetensors   21 GB   ← I2V/T2V 用
-├── minimax_h3_fl2va_pruned_fp8_scaled.safetensors     21 GB
-├── minimax_h3_fl2va_int8_convrot.safetensors          34 GB
-├── minimax_h3_fl2va_pruned_bf16.safetensors           40 GB
-├── minimax_h3_fl2va_bf16.safetensors                  66 GB
-├── minimax_h3_ref2va_pruned_int8_convrot.safetensors  21 GB   ← R2V 用
-├── minimax_h3_ref2va_pruned_fp8_scaled.safetensors    21 GB
-├── minimax_h3_ref2va_int8_convrot.safetensors         34 GB
-├── minimax_h3_ref2va_pruned_bf16.safetensors          40 GB
-└── minimax_h3_ref2va_bf16.safetensors                 66 GB
-vae/
-├── minimax_h3_video_vae_fp16.safetensors              5.2 GB
-└── minimax_h3_audio_vae_fp32.safetensors              0.6 GB
-text_encoders/
-├── qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors       15.7 GB
-├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors    27.1 GB
-└── qwen3vl_32b_minimax_h3_bf16.safetensors            51.5 GB
-```
-
-下载命令（`modelscope` CLI，`--local_dir` 直接落盘不缓存）：
+### 4.1 推荐：目前 repo 的交互式安装器
 
 ```bash
-pip install modelscope
-
-# ── 最小 I2V 依赖（fl2va + 视频 VAE + nvFP4 TE，共 ~40 GB）──
-modelscope download Comfy-Org/MiniMax-H3 \
-  --include 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors' \
-  --local_dir ComfyUI/models/
-modelscope download Comfy-Org/MiniMax-H3 \
-  --include 'vae/minimax_h3_video_vae_fp16.safetensors' \
-  --local_dir ComfyUI/models/
-modelscope download Comfy-Org/MiniMax-H3 \
-  --include 'text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' \
-  --local_dir ComfyUI/models/
-
-# ── R2V 额外依赖（ref2va + 音频 VAE，共 ~21 GB）──
-modelscope download Comfy-Org/MiniMax-H3 \
-  --include 'diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors' \
-  --local_dir ComfyUI/models/
-modelscope download Comfy-Org/MiniMax-H3 \
-  --include 'vae/minimax_h3_audio_vae_fp32.safetensors' \
-  --local_dir ComfyUI/models/
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/install_wizard.py
+python3 install_wizard.py
 ```
 
-### 4.2 HuggingFace（可选，需代理）
+安装器只使用 Hugging Face，并逐一检查模型的精确字节数：已完成则跳过，未完成则以 `wget --continue` 续传。下载中断后直接重跑同一命令即可。
 
-HF 的 keys-heretic 一体包含额外内容（Heretic 无审查 TE、RealESRGAN 超分模型）：
+### 4.2 固定的 Hugging Face 来源
+
+- 主模型、VAE、Heretic/nvFP4 编码器、超分模型：`drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights`，revision `2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e`
+- INT8/BF16 补充编码器：`Comfy-Org/MiniMax-H3`，revision `d07f69bc8fa09c9717e1e47180034f9322e0e54d`
+
+手动下载单一文件时也应固定 revision，并保留同名部分文件以便续传：
 
 ```bash
-# Heretic 无审查文本编码器（可选，画质更丰富、内容限制少）
 export http_proxy=http://PROXY:port; export https_proxy=$http_proxy
-wget -O ComfyUI/models/text_encoders/H3/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors \
-  https://huggingface.co/ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot/resolve/main/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors
-
-# 超分模型（可选，2×/4× 超分用）
-huggingface-cli download drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights \
-  --include 'upscale_models/RealESRGAN_x2plus.pth' --local-dir ComfyUI/models/
+mkdir -p ComfyUI/models/diffusion_models
+cd ComfyUI/models/diffusion_models
+wget --continue --tries=0 --timeout=60 --read-timeout=60 \
+  https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights/resolve/2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 ```
-
-> 提示：扩散模型（fl2va/ref2va）和 VAE 建议优先走 ModelScope，比 HF 直连快且稳定；HF 直连易被限速或需要代理。
 
 ---
 

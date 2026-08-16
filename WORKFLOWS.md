@@ -495,7 +495,7 @@ H3CLIPLoader (GGUF) ──→     ↑
 |--------|------|------|------|------|
 | **Heretic INT8 ConvRot** | `H3/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors` | 25 GB | 画质更丰富，内容限制少 | 偶尔输出不稳定 |
 | **官方 nvFP4 AWQ** | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | 15 GB | 官方推荐，稳定可靠 | 有内容过滤 |
-| **官方 INT8 ConvRot** | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | 26 GB | 质量与速度平衡 | 需从 ModelScope 单独下载 |
+| **官方 INT8 ConvRot** | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | 26 GB | 质量与速度平衡 | 安装器从 Hugging Face 下载 |
 | **官方 BF16** | `qwen3vl_32b_minimax_h3_bf16.safetensors` | 48 GB | 最高精度 | 最慢，占内存大 |
 
 **命名规律**:

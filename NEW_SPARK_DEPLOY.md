@@ -15,7 +15,7 @@
 
 ```bash
 # 在新 DGX Spark 上直接执行
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/deploy_from_scratch.sh
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/deploy_from_scratch.sh
 bash deploy_from_scratch.sh
 ```
 
@@ -24,16 +24,15 @@ bash deploy_from_scratch.sh
 PROXY=http://your-proxy:port bash deploy_from_scratch.sh
 ```
 
-脚本自动完成 7 个阶段：
+脚本自动完成 6 个阶段：
 1. 系统依赖 (ffmpeg, git)
 2. Python venv + PyTorch CUDA 13 + 依赖
 3. ComfyUI + 8 个自定义节点
-4. ModelScope 文本编码器 (~88GB)
-5. HuggingFace Heretic TE (~32GB)
-6. HuggingFace keys-heretic 权重 (~25GB)
-7. 启动 ComfyUI
+4. Hugging Face 主模型 (~91GB)
+5. Hugging Face INT8/BF16 补充文本编码器 (~74GB)
+6. 启动 ComfyUI
 
-**下载总量**: ~145GB
+每个模型都会核对精确字节数；完整文件跳过、部分文件断点续传。**下载总量**约 165GB。
 
 ---
 
@@ -56,25 +55,24 @@ PROXY=http://your-proxy:port bash deploy_from_scratch.sh
 ```bash
 # 在主节点上执行
 cd /root/minnimax-h3
-bash deploy_to_new_spark.sh <新机器管理IP> <新机器RoCE_IP> [密码]
+bash deploy_to_new_spark.sh <新机器管理IP> <新机器RoCE_IP> <密码> <本机RoCE_IP>
 
 # 示例
-bash deploy_to_new_spark.sh 192.168.22.161 10.10.12.21 <你的密码>
+bash deploy_to_new_spark.sh 192.168.22.161 10.10.12.21 <你的密码> 10.10.12.20
 ```
 
 **脚本自动完成：**
 1. ✅ 探测目标机器环境
 2. ✅ 安装系统依赖（ffmpeg）
 3. ✅ 创建 Python venv + 安装 PyTorch CUDA 13 + ComfyUI 依赖
-4. ✅ RoCE 高速传输项目文件（~57GB）和 ModelScope 缓存（~88GB）
-5. ✅ 创建模型 symlink
-6. ✅ 启动 ComfyUI
+4. ✅ 以 `rsync -L` 通过 RoCE 传输项目与全部模型（旧链接转换为实体文件）
+5. ✅ 验证模型并启动 ComfyUI
 
 ---
 
 ## 传输内容明细
 
-### 项目文件 (~57GB)
+### 项目与模型文件 (~145GB)
 ```
 /root/minnimax-h3/ → /root/minnimax-h3/
 ├── comfy/ComfyUI/          # ComfyUI v0.30.1 + 所有模型 + 自定义节点
@@ -82,14 +80,6 @@ bash deploy_to_new_spark.sh 192.168.22.161 10.10.12.21 <你的密码>
 ├── scripts/                # 部署/下载脚本
 ├── DEPLOYMENT.md           # 主部署文档
 └── deploy_to_new_spark.sh  # 本一键脚本
-```
-
-### ModelScope 缓存 (~88GB)
-```
-/root/.cache/modelscope/models/Comfy-Org--MiniMax-H3/snapshots/master/text_encoders/
-├── qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors    (15 GB)
-├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors  (26 GB)
-└── qwen3vl_32b_minimax_h3_bf16.safetensors          (48 GB)
 ```
 
 ### 传输带宽
@@ -126,31 +116,15 @@ python3 -m venv /opt/minnimax-h3-venv
 sshpass -p '<你的密码>' ssh-copy-id root@<RoCE_IP>
 
 # 同步项目
-rsync -av --progress \
+rsync -aL --progress \
   -e "sshpass -p '<你的密码>' ssh -o StrictHostKeyChecking=no -o BindAddress=<本机RoCE_IP>" \
   --exclude='.git' --exclude='__pycache__' --exclude='cache_hf' \
   /root/minnimax-h3/ root@<RoCE_IP>:/root/minnimax-h3/
-
-# 同步 ModelScope 缓存
-rsync -av --progress \
-  -e "sshpass -p '<你的密码>' ssh -o StrictHostKeyChecking=no -o BindAddress=<本机RoCE_IP>" \
-  /root/.cache/modelscope/models/Comfy-Org--MiniMax-H3/snapshots/master/text_encoders/ \
-  root@<RoCE_IP>:/root/.cache/modelscope/models/Comfy-Org--MiniMax-H3/snapshots/master/text_encoders/
 ```
 
-### 4. 创建模型 symlink
-```bash
-ssh root@<RoCE_IP>
-DST=/root/minnimax-h3/comfy/ComfyUI/models/text_encoders
-SRC=/root/.cache/modelscope/models/Comfy-Org--MiniMax-H3/snapshots/master/text_encoders
-for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
-         qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
-         qwen3vl_32b_minimax_h3_bf16.safetensors; do
-    ln -sf "$SRC/$f" "$DST/$f"
-done
-```
+`-L` 会在目标端写入模型实体文件，因此不需要另外复制缓存或建立链接。
 
-### 5. 装 ComfyUI 依赖 + 启动
+### 4. 装 ComfyUI 依赖 + 启动
 ```bash
 cd /root/minnimax-h3/comfy/ComfyUI
 /opt/minnimax-h3-venv/bin/pip install -r requirements.txt
