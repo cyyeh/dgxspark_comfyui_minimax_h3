@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -249,6 +250,69 @@ class HuggingFaceDownloadTests(unittest.TestCase):
 
         self.assertTrue(model.is_symlink())
         self.assertEqual(list(self.model_dir.glob("model.bin.materializing.*")), [])
+
+
+class HuggingFaceStageTests(unittest.TestCase):
+    def test_pinned_manifests_cover_every_required_model_with_exact_sizes(self):
+        self.assertEqual(
+            install_wizard.HF_BASE_MANIFEST,
+            {
+                "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors": 20_970_379_616,
+                "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": 20_970_379_616,
+                "text_encoders/H3/qwen3vl_32b_h3_generation_tail_50_63_int8_convrot.safetensors": 7_609_128_707,
+                "text_encoders/H3/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors": 26_363_476_151,
+                "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": 15_687_142_551,
+                "upscale_models/RealESRGAN_x2plus.pth": 67_061_725,
+                "upscale_models/RealESRGAN_x4plus.pth": 67_040_989,
+                "vae/minimax_h3_audio_vae_fp32.safetensors": 605_254_808,
+                "vae/minimax_h3_video_vae_fp16.safetensors": 5_207_808_496,
+            },
+        )
+        self.assertEqual(
+            install_wizard.HF_EXTRA_MANIFEST,
+            {
+                "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors": 27_141_342_152,
+                "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors": 51_506_295_256,
+            },
+        )
+        self.assertRegex(install_wizard.HF_BASE_REVISION, r"^[0-9a-f]{40}$")
+        self.assertRegex(install_wizard.HF_EXTRA_REVISION, r"^[0-9a-f]{40}$")
+
+    def test_scratch_stages_use_the_shared_hugging_face_downloader(self):
+        with (
+            mock.patch.object(install_wizard, "header"),
+            mock.patch.object(install_wizard, "scratch_list_models"),
+            mock.patch.object(install_wizard, "download_hf_group") as download,
+        ):
+            install_wizard.scratch_hf_weights()
+
+        download.assert_called_once_with(
+            install_wizard.HF_BASE_REPO,
+            install_wizard.HF_BASE_REVISION,
+            install_wizard.HF_BASE_MANIFEST,
+            "Hugging Face 主模型",
+        )
+
+        self.assertTrue(
+            hasattr(install_wizard, "scratch_hf_extra_text_encoders"),
+            "the supplemental text encoders must also use Hugging Face",
+        )
+        with (
+            mock.patch.object(install_wizard, "header"),
+            mock.patch.object(install_wizard, "download_hf_group") as download,
+        ):
+            install_wizard.scratch_hf_extra_text_encoders()
+
+        download.assert_called_once_with(
+            install_wizard.HF_EXTRA_REPO,
+            install_wizard.HF_EXTRA_REVISION,
+            install_wizard.HF_EXTRA_MANIFEST,
+            "Hugging Face 补充文本编码器",
+        )
+
+    def test_python_environment_has_no_modelscope_dependency(self):
+        source = inspect.getsource(install_wizard.step_python_env).lower()
+        self.assertNotIn("modelscope", source)
 
 
 if __name__ == "__main__":
