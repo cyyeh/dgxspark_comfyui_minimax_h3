@@ -46,6 +46,8 @@ class ProductSourceTests(unittest.TestCase):
                 self.assertNotIn("huggingface-cli download", source)
                 self.assertNotIn("huggingface_hub.cli.hf download", source)
                 self.assertNotIn("--tries=0", source)
+                self.assertNotRegex(source, r"wget[^\n]*\s-O(?:\s|$)")
+                self.assertNotRegex(source, r"wget[^\n]*--tries=(?!10\b)\d+")
 
 
 if __name__ == "__main__":

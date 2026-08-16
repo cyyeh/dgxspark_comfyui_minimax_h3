@@ -272,10 +272,13 @@ python3 main.py --listen 0.0.0.0 --port 8188 --reserve-vram 8
 ## 10. 常见问题
 
 ### Q: 下载从 HuggingFace 不落盘？
-A: 禁用 Xet 并使用 wget 直接下载：
+A: 不要指定会截断部分文件的输出覆盖参数。进入目标目录后，使用固定 revision 续传：
 ```bash
 export HF_HUB_DISABLE_XET=1
-wget --tries=3 -O 目标路径 HF下载URL
+mkdir -p ComfyUI/models/diffusion_models
+cd ComfyUI/models/diffusion_models
+wget --continue --tries=10 --timeout=60 --read-timeout=60 \
+  https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights/resolve/2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 ```
 
 ### Q: 网络不通？
