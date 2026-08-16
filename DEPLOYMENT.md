@@ -36,33 +36,11 @@
 
 ## 3. 所有模型文件清单
 
-### 3.1 HuggingFace 下载（直接落盘，wget + 代理）
+### 3.1 Hugging Face 主模型（固定 revision）
 
-| 文件 | 大小 | 来源 | 目录 |
-|------|------|------|------|
-| `qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors` | 25 GB | HF: `ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot` | `models/text_encoders/H3/` |
-| `qwen3vl_32b_h3_generation_tail_50_63_int8_convrot.safetensors` | 7.1 GB | 同上 | `models/text_encoders/H3/` |
+来源：`drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights`
 
-**下载命令**:
-```bash
-# 如需代理: export http_proxy=http://your-proxy:port; export https_proxy=$http_proxy
-wget --tries=3 --timeout=60 --progress=dot:giga \
-  -O models/text_encoders/H3/{filename} \
-  https://huggingface.co/ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot/resolve/main/{filename}
-```
-
-### 3.2 ModelScope 下载（symlink）
-
-| 文件 | 来源 | 目录 |
-|------|------|------|
-| `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | ModelScope: `Comfy-Org/MiniMax-H3` | `models/text_encoders/` |
-| `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | 同上 | `models/text_encoders/` |
-| `qwen3vl_32b_minimax_h3_bf16.safetensors` | 同上 | `models/text_encoders/` |
-
-> 这三个文件通过 modelscope CLI 下载至 `/root/.cache/modelscope/`，
-> 然后在 models 目录下创建 symlink。如果在新机器部署可直接从 ModelScope 重新下载。
-
-### 3.3 扩散模型 + VAE（从 HF 权重包 / ModelScope 下载）
+revision：`2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e`
 
 | 文件 | 大小 | 目录 | 用途 |
 |------|------|------|------|
@@ -71,6 +49,30 @@ wget --tries=3 --timeout=60 --progress=dot:giga \
 | `minimax_h3_video_vae_fp16.safetensors` | 4.9 GB | `models/vae/` | 视频编解码（三种模式共用） |
 | `minimax_h3_audio_vae_fp32.safetensors` | 578 MB | `models/vae/` | 音频编解码（R2V 必需） |
 | `RealESRGAN_x2plus.pth` | 64 MB | `models/upscale_models/` | 视频 2× 超分 |
+
+同一 revision 也包含 Heretic、generation-tail 与 nvFP4 文本编码器，以及 `RealESRGAN_x4plus.pth`。安装器会按精确字节数检查每个目标文件。
+
+### 3.2 Hugging Face 补充文本编码器（固定 revision）
+
+来源：`Comfy-Org/MiniMax-H3`
+
+revision：`d07f69bc8fa09c9717e1e47180034f9322e0e54d`
+
+| 文件 | 目录 |
+|------|------|
+| `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | `models/text_encoders/` |
+| `qwen3vl_32b_minimax_h3_bf16.safetensors` | `models/text_encoders/` |
+
+### 3.3 下载与续传
+
+推荐直接使用目前 repo 的安装器：
+
+```bash
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/install_wizard.py
+python3 install_wizard.py
+```
+
+安装器使用固定 revision 的 `wget --continue` URL。完整文件会跳过，部分文件会续传，大小异常的文件会先改名隔离。
 
 > I2V（图生视频）能力的完整说明、依赖与下载方式见 **[I2V.md](I2V.md)**。
 
@@ -218,28 +220,10 @@ pip install -r ComfyUI/requirements.txt
 pip install sageattention==1.0.6 sqlalchemy alembic
 pip install pillow color-matcher matplotlib mss opencv-python-headless huggingface_hub
 
-# 7. 下载模型权重（三部分）
-#   a) ModelScope: qwen3vl_32b_minimax_h3 的三个 text encoder
-modelscope download Comfy-Org/MiniMax-H3 --local_dir /path/to/cache
-ln -s /path/to/cache/text_encoders/qwen3vl_32b_minimax_h3_*.safetensors ComfyUI/models/text_encoders/
-
-#   b) HuggingFace Heretic TE (两个文件，用代理):
-export http_proxy=http://PROXY_IP:PORT; export https_proxy=$http_proxy
-wget -O ComfyUI/models/text_encoders/H3/{file} https://huggingface.co/ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot/resolve/main/{file}
-
-#   c) keys-heretic 权重 (从 HuggingFace 一体包下载):
-#      huggingface-cli download drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights \
-#        --local-dir ComfyUI/models/
-#      包含以下文件:
-#      diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
-#      diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors
-#      vae/minimax_h3_video_vae_fp16.safetensors
-#      vae/minimax_h3_audio_vae_fp32.safetensors
-#      upscale_models/RealESRGAN_x2plus.pth
-#      upscale_models/RealESRGAN_x4plus.pth
-#   d) 备选：扩散模型 + VAE 也可从 ModelScope 直连下载（国内更快，无需代理），
-#      详见 I2V.md 第 4 节。fl2va(20GB) + ref2va(20GB) + video_vae + audio_vae
-#      均可在 modelscope.cn/models/Comfy-Org/MiniMax-H3 找到。
+# 7. 下载模型权重（固定 Hugging Face revisions，可断点续传）
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/deploy_from_scratch.sh
+# 建议直接让脚本完成全部步骤；若已完成上述手动配置，可参考脚本内
+# download_hf_file 调用取得相同的逐文件检查与续传行为。
 
 # 8. 创建工作流目录，复制 JSON
 mkdir -p workflows
@@ -288,10 +272,13 @@ python3 main.py --listen 0.0.0.0 --port 8188 --reserve-vram 8
 ## 10. 常见问题
 
 ### Q: 下载从 HuggingFace 不落盘？
-A: 禁用 Xet 并使用 wget 直接下载：
+A: 不要指定会截断部分文件的输出覆盖参数。进入目标目录后，使用固定 revision 续传：
 ```bash
 export HF_HUB_DISABLE_XET=1
-wget --tries=3 -O 目标路径 HF下载URL
+mkdir -p ComfyUI/models/diffusion_models
+cd ComfyUI/models/diffusion_models
+wget --continue --tries=10 --timeout=60 --read-timeout=60 \
+  https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights/resolve/2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
 ```
 
 ### Q: 网络不通？
@@ -329,6 +316,6 @@ __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
 | 类别 | 总大小 |
 |------|--------|
 | HF 权重一体包 | ~91 GB |
-| ModelScope 补充编码器 | ~74 GB |
+| HF 补充编码器 | ~74 GB |
 | ComfyUI + Custom Nodes | ~500 MB |
 | **总计下载** | **~165 GB** |

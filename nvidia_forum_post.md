@@ -4,12 +4,12 @@
 
 这是一个专为 **NVIDIA DGX Spark (GB10, Grace-Hopper)** 打造的开源部署包，让 MiniMax H3 视频生成模型在 DGX Spark 上一键运行。集成了 keys-heretic 社区的 Sol-Attention 加速优化（Blackwell 架构适配）、Heretic 无审查文本编码器、视频超分、多镜头生成等 12 个预调工作流，开箱即用。
 
-**开源地址**: https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3
+**开源地址**: https://github.com/cyyeh/dgxspark_comfyui_minimax_h3
 
 ## 为什么做这个项目
 
 MiniMax H3 是目前开源最强的视频生成模型之一，官方提供了 ComfyUI 支持。但在 DGX Spark 上部署并非一帆风顺：
-- 模型权重分散在 HuggingFace、ModelScope 等多个源，总下载量 ~165GB，逐个找很费劲
+- 模型权重约 165GB，逐个确认文件、版本与断点续传很费劲
 - Sol-Attention 在 Blackwell (sm_121) 上需要特殊适配，社区方案散落在多个 fork 中
 - GB10 统一内存架构需要合理的 `--reserve-vram` 参数，否则容易 OOM
 - 12 个不同场景的工作流（文生视频 / 图生视频 / 多镜头 / 关键帧 / Heretic TE），每个参数调优都要试错
@@ -22,7 +22,7 @@ MiniMax H3 是目前开源最强的视频生成模型之一，官方提供了 Co
 
 | 方案 | 适用 | 耗时 | 说明 |
 |------|------|------|------|
-| **A: 从零下载** | 全新 DGX Spark | 取决于网速 | 全部从 HuggingFace + ModelScope 自动下载 ~165GB |
+| **A: 从零下载** | 全新 DGX Spark | 取决于网速 | 全部从 Hugging Face 固定 revisions 自动下载 ~165GB |
 | **B: 主节点克隆** | 已有部署好的机器 | **~5 分钟** | 通过 RoCE 网络 (400Gbps) 直传 ~145GB |
 
 每种方案都提供**交互式向导**（`install_wizard.py`，带进度条、断点续传）和**无人值守脚本**（`deploy_from_scratch.sh` / `deploy_to_new_spark.sh`）。
@@ -73,13 +73,13 @@ MiniMax H3 是目前开源最强的视频生成模型之一，官方提供了 Co
 | PyTorch | 2.11+ cu130 |
 | 内存 | ≥ 96 GB 统一内存 |
 | 磁盘 | ≥ 200 GB 剩余空间 |
-| 网络 | 需访问 GitHub / HuggingFace / ModelScope |
+| 网络 | 需访问 GitHub / Hugging Face |
 
 ## 快速开始（一行命令）
 
 ```bash
 # SSH 到你的 DGX Spark，执行：
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/install_wizard.py
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/install_wizard.py
 python3 install_wizard.py
 ```
 
@@ -107,7 +107,7 @@ Camera: Slow dolly forward through the street. Audio: ambient city hum, distant 
 
 ## 相关链接
 
-- 项目仓库: https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3
+- 项目仓库: https://github.com/cyyeh/dgxspark_comfyui_minimax_h3
 - keys-heretic 社区项目: https://github.com/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-speed-upgrades-upscaler-finish-Single-DGX-Spark
 - MiniMax H3 官方 ComfyUI: https://github.com/Comfy-Org/MiniMax-H3
 - NVIDIA 论坛原帖（H3 在 DGX Spark 上的测试讨论）: https://forums.developer.nvidia.com/t/it-takes-6-minutes-for-minimax-h3-to-generate-a-5-second-480p-video-on-dgx-spark-how-long-does-it-take-for-yours/379139

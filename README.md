@@ -1,6 +1,6 @@
 # DGX Spark ComfyUI + MiniMax H3 — One-Click Deploy
 
-[🇨🇳 中文版](#中文版) | [📊 Benchmark](BENCHMARK.md) | [🎬 I2V 图生视频](I2V.md) | [🔄 Gitee Mirror](https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3) | [🐙 GitHub](https://github.com/luqidaxia/dgxspark_comfyui_minimax_h3)
+[🇨🇳 中文版](#中文版) | [📊 Benchmark](BENCHMARK.md) | [🎬 I2V 图生视频](I2V.md) | [🐙 GitHub](https://github.com/cyyeh/dgxspark_comfyui_minimax_h3)
 
 One-click deploy MiniMax H3 video generation on a single NVIDIA DGX Spark (GB10).
 
@@ -43,7 +43,7 @@ For a fresh DGX Spark with nothing installed.
 ### Quick Start
 
 ```bash
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/deploy_from_scratch.sh
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/deploy_from_scratch.sh
 bash deploy_from_scratch.sh
 ```
 
@@ -59,12 +59,12 @@ Both plans in one wizard:
 ```
 Welcome
   └─→ Choose plan:
-       [A] From scratch — download all from HF / ModelScope (~165 GB)
+       [A] From scratch — download all models from Hugging Face (~165 GB)
        [B] Clone from master — copy from existing node (~5 min)
 
 Shared stages:
   System deps → Python env → ComfyUI + custom nodes →
-  ├─ [A] HF weights (~91 GB) → ModelScope (~74 GB)
+  ├─ [A] HF main weights (~91 GB) → HF extra encoders (~74 GB)
   └─ [B] rsync models (~145 GB, RoCE 5 min)
   → Launch ComfyUI → Done
 ```
@@ -100,7 +100,7 @@ PROXY=http://your-proxy:port bash deploy_from_scratch.sh
 | 2. Python env | venv + PyTorch 2.11+cu130 + sageattention + sqlalchemy | ~5 GB |
 | 3. ComfyUI + nodes | v0.30.1 + 8 custom nodes + 12 workflows | ~1 GB |
 | 4. HF weights | Diffusion + VAE + upscaler + Heretic TE + nvFP4 TE | ~91 GB |
-| 5. ModelScope | INT8 + BF16 text encoders | ~74 GB |
+| 5. HF extra encoders | INT8 + BF16 text encoders | ~74 GB |
 | 6. Launch & verify | Start ComfyUI, wait HTTP 200, generate scripts | — |
 | **Total** | | **~171 GB** |
 
@@ -109,17 +109,13 @@ PROXY=http://your-proxy:port bash deploy_from_scratch.sh
 | Source | Contents | Size |
 |---|---|---|
 | HuggingFace `drowzeys/keys-heretic-...-weights` | All model weights | ~91 GB |
-| ModelScope `Comfy-Org/MiniMax-H3` | INT8 + BF16 text encoders | ~74 GB |
+| Hugging Face `Comfy-Org/MiniMax-H3` (pinned revision) | INT8 + BF16 text encoders | ~74 GB |
 | GitHub repos | ComfyUI + custom nodes | ~1 GB |
 | PyPI | Python dependencies | ~5 GB |
 
 ### Resumable
 
-Auto-skips completed stages on re-run:
-
-- `models/.weights_downloaded` → skip HF download
-- `~/.cache/modelscope/.../MiniMax-H3/.done` → skip ModelScope
-- Existing `.git/` → skip git clone
+Every model is checked by its exact byte size before download. Complete files are skipped, partial files resume with `wget --continue`, and existing `.git/` directories skip cloning.
 
 ### Post-Deploy Management
 
@@ -143,7 +139,7 @@ bash deploy_to_new_spark.sh <mgmt-IP> <roce-IP> [password]
 bash deploy_to_new_spark.sh 10.0.0.101 10.10.0.101 your_password
 ```
 
-Pipeline: probe → install deps → RoCE transfer ~145 GB → config symlinks → launch & verify.
+Pipeline: probe → install deps → RoCE transfer ~145 GB (dereference legacy links) → verify models → launch.
 
 ---
 
@@ -217,7 +213,7 @@ MP4 (H.264) or WebM, with audio track.
 | PyTorch | 2.11+ cu130 |
 | Memory | ≥ 96 GB unified memory |
 | Disk | ≥ 200 GB free |
-| Network | GitHub, HuggingFace, ModelScope (or HTTP proxy) |
+| Network | GitHub and Hugging Face (or HTTP proxy) |
 
 ---
 
@@ -258,7 +254,7 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
     ├── ComfyUI/
     │   ├── models/
     │   │   ├── diffusion_models/  # 2 files
-    │   │   ├── text_encoders/     # + H3/ symlink
+    │   │   ├── text_encoders/     # Includes H3/
     │   │   ├── vae/               # 2 files
     │   │   └── upscale_models/    # 2 files
     │   ├── custom_nodes/          # 8 nodes
@@ -273,13 +269,13 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
 - [keys-heretic project](https://github.com/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-speed-upgrades-upscaler-finish-Single-DGX-Spark)
 - [HF weights pack](https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights)
 - [MiniMax H3 ComfyUI](https://github.com/Comfy-Org/MiniMax-H3)
-- [ModelScope: Comfy-Org/MiniMax-H3](https://modelscope.cn/models/Comfy-Org/MiniMax-H3)
+- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)
 - [NVIDIA DGX Spark](https://www.nvidia.com/en-us/products/workstations/dgx-spark/)
 - [NVIDIA Forum Discussion](https://forums.developer.nvidia.com/t/it-takes-6-minutes-for-minimax-h3-to-generate-a-5-second-480p-video-on-dgx-spark-how-long-does-it-take-for-yours/379139)
 
 ---
 
-*Maintained by [@alexlu0912_admin](https://gitee.com/alexlu0912_admin) · MIT License*
+*Maintained by [@cyyeh](https://github.com/cyyeh) · MIT License*
 
 ---
 
@@ -291,7 +287,7 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
 
 # DGX Spark 一键部署 ComfyUI + MiniMax H3
 
-[English](#dgx-spark-comfyui--minimax-h3--one-click-deploy) | [📊 测速报告](BENCHMARK.md) | [🎬 I2V 图生视频](I2V.md) | [🌐 GitHub Mirror](https://github.com/luqidaxia/dgxspark_comfyui_minimax_h3) | [Gitee 仓库](https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3)
+[English](#dgx-spark-comfyui--minimax-h3--one-click-deploy) | [📊 测速报告](BENCHMARK.md) | [🎬 I2V 图生视频](I2V.md) | [🌐 GitHub](https://github.com/cyyeh/dgxspark_comfyui_minimax_h3)
 
 在单台 NVIDIA DGX Spark (GB10) 上一键部署 MiniMax H3 视频生成环境。
 
@@ -334,7 +330,7 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
 ### 快速开始
 
 ```bash
-wget https://gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3/raw/master/deploy_from_scratch.sh
+wget https://raw.githubusercontent.com/cyyeh/dgxspark_comfyui_minimax_h3/main/deploy_from_scratch.sh
 bash deploy_from_scratch.sh
 ```
 
@@ -350,12 +346,12 @@ python3 install_wizard.py
 ```
 欢迎页
   └─→ 选择方案:
-       [A] 从零部署 — 全部从 HF / ModelScope 下载 (~165 GB)
+       [A] 从零部署 — 全部模型从 Hugging Face 下载 (~165 GB)
        [B] 主节点克隆 — 从已有节点高速复制 (~5 分钟)
 
 共用阶段:
   系统依赖 → Python 环境 → ComfyUI + 自定义节点 →
-  ├─ [A] HF 权重 (~91 GB) → ModelScope (~74 GB)
+  ├─ [A] HF 主模型 (~91 GB) → HF 补充编码器 (~74 GB)
   └─ [B] rsync 模型 (~145 GB, RoCE 5 分钟)
   → 启动 ComfyUI → 完成
 ```
@@ -391,7 +387,7 @@ PROXY=http://你的代理:端口 bash deploy_from_scratch.sh
 | 2. Python 环境 | venv + PyTorch 2.11+cu130 + sageattention + sqlalchemy | ~5 GB |
 | 3. ComfyUI + 节点 | v0.30.1 + 8 个自定义节点 + 12 个工作流 | ~1 GB |
 | 4. HF 权重 | Diffusion + VAE + upscaler + Heretic TE + nvFP4 TE | ~91 GB |
-| 5. ModelScope | INT8 + BF16 文本编码器 | ~74 GB |
+| 5. HF 补充编码器 | INT8 + BF16 文本编码器 | ~74 GB |
 | 6. 启动验证 | 启动 ComfyUI，等待 HTTP 200，生成管理脚本 | — |
 | **总计** | | **~171 GB** |
 
@@ -400,17 +396,13 @@ PROXY=http://你的代理:端口 bash deploy_from_scratch.sh
 | 来源 | 内容 | 大小 |
 |---|---|---|
 | HuggingFace `drowzeys/keys-heretic-...-weights` | 全部模型权重 | ~91 GB |
-| ModelScope `Comfy-Org/MiniMax-H3` | INT8 + BF16 文本编码器 | ~74 GB |
+| Hugging Face `Comfy-Org/MiniMax-H3`（固定 revision） | INT8 + BF16 文本编码器 | ~74 GB |
 | GitHub 仓库 | ComfyUI + 自定义节点 | ~1 GB |
 | PyPI | Python 依赖 | ~5 GB |
 
 ### 断点续传
 
-重新运行自动跳过已完成步骤：
-
-- `models/.weights_downloaded` → 跳过 HF 下载
-- `~/.cache/modelscope/.../MiniMax-H3/.done` → 跳过 ModelScope
-- 已有 `.git/` → 跳过 git clone
+每个模型下载前都会核对精确字节数：完整文件直接跳过，部分文件以 `wget --continue` 续传；已有 `.git/` 目录则跳过克隆。
 
 ### 部署后管理
 
@@ -434,7 +426,7 @@ bash deploy_to_new_spark.sh <管理IP> <RoCE_IP> [密码]
 bash deploy_to_new_spark.sh 192.168.22.161 10.10.12.21 你的密码
 ```
 
-流程：探路 → 装依赖 → RoCE 传 ~145 GB → 配置 symlink → 启动验证。
+流程：探路 → 装依赖 → RoCE 传 ~145 GB（旧链接转实体文件）→ 验证模型 → 启动。
 
 ---
 
@@ -508,7 +500,7 @@ Camera: Slow dolly forward. Audio: ambient city hum, distant sirens.
 | PyTorch | 2.11+ cu130 |
 | 内存 | ≥ 96 GB 统一内存 |
 | 磁盘 | ≥ 200 GB 剩余空间 |
-| 网络 | 需访问 GitHub、HuggingFace、ModelScope（或用 HTTP 代理） |
+| 网络 | 需访问 GitHub、Hugging Face（或用 HTTP 代理） |
 
 ---
 
@@ -549,7 +541,7 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
     ├── ComfyUI/
     │   ├── models/
     │   │   ├── diffusion_models/  # 2 个文件
-    │   │   ├── text_encoders/     # + H3/ 软链接
+    │   │   ├── text_encoders/     # 包含 H3/
     │   │   ├── vae/               # 2 个文件
     │   │   └── upscale_models/    # 2 个文件
     │   ├── custom_nodes/          # 8 个节点
@@ -564,10 +556,10 @@ INSTALL_DIR=/mnt/bigdisk/minnimax-h3 bash deploy_from_scratch.sh
 - [keys-heretic 项目](https://github.com/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-speed-upgrades-upscaler-finish-Single-DGX-Spark)
 - [HF 权重一体包](https://huggingface.co/drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights)
 - [MiniMax H3 ComfyUI](https://github.com/Comfy-Org/MiniMax-H3)
-- [ModelScope: Comfy-Org/MiniMax-H3](https://modelscope.cn/models/Comfy-Org/MiniMax-H3)
+- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)
 - [NVIDIA DGX Spark](https://www.nvidia.com/en-us/products/workstations/dgx-spark/)
 - [NVIDIA 论坛讨论](https://forums.developer.nvidia.com/t/it-takes-6-minutes-for-minimax-h3-to-generate-a-5-second-480p-video-on-dgx-spark-how-long-does-it-take-for-yours/379139)
 
 ---
 
-*维护者 [@alexlu0912_admin](https://gitee.com/alexlu0912_admin) · MIT License*
+*維護者 [@cyyeh](https://github.com/cyyeh) · MIT License*

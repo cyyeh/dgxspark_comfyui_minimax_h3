@@ -22,9 +22,11 @@ import time
 import shutil
 import argparse
 import subprocess
+import tempfile
 import urllib.request
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import quote
 
 # ── 终端颜色 ─────────────────────────────────────────────────
 C = {
@@ -74,6 +76,28 @@ class Config:
             os.environ["HTTPS_PROXY"] = self.proxy
 
 cfg = None
+
+
+HF_BASE_REPO = "drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights"
+HF_BASE_REVISION = "2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e"
+HF_BASE_MANIFEST = {
+    "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors": 20_970_379_616,
+    "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors": 20_970_379_616,
+    "text_encoders/H3/qwen3vl_32b_h3_generation_tail_50_63_int8_convrot.safetensors": 7_609_128_707,
+    "text_encoders/H3/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors": 26_363_476_151,
+    "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": 15_687_142_551,
+    "upscale_models/RealESRGAN_x2plus.pth": 67_061_725,
+    "upscale_models/RealESRGAN_x4plus.pth": 67_040_989,
+    "vae/minimax_h3_audio_vae_fp32.safetensors": 605_254_808,
+    "vae/minimax_h3_video_vae_fp16.safetensors": 5_207_808_496,
+}
+
+HF_EXTRA_REPO = "Comfy-Org/MiniMax-H3"
+HF_EXTRA_REVISION = "d07f69bc8fa09c9717e1e47180034f9322e0e54d"
+HF_EXTRA_MANIFEST = {
+    "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors": 27_141_342_152,
+    "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors": 51_506_295_256,
+}
 
 
 def term_width():
@@ -181,6 +205,113 @@ def run(cmd_list, check=True, show=True, cwd=None, capture=False, timeout=600):
         print(f"\n  {warn()} 用户中断"); sys.exit(0)
 
 
+def _quarantine_model_path(path):
+    """Move an unusable model aside without overwriting an earlier quarantine."""
+    path = Path(path)
+    suffix = ".invalid"
+    candidate = path.with_name(path.name + suffix)
+    index = 1
+    while os.path.lexists(candidate):
+        candidate = path.with_name(f"{path.name}{suffix}.{index}")
+        index += 1
+    os.replace(path, candidate)
+    info(f"隔离异常文件: {path.name} → {candidate.name}")
+    return candidate
+
+
+def _prepare_model_path(path, expected_size):
+    """Return True only when path is a complete regular file of the expected size."""
+    path = Path(path)
+
+    if path.is_symlink():
+        try:
+            target = path.resolve(strict=True)
+            target_size = target.stat().st_size
+        except OSError:
+            _quarantine_model_path(path)
+            return False
+
+        if target_size > expected_size:
+            _quarantine_model_path(path)
+            return False
+
+        temporary = None
+        try:
+            fd, temporary_name = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f"{path.name}.materializing.",
+            )
+            temporary = Path(temporary_name)
+            with os.fdopen(fd, "wb") as destination, target.open("rb") as source:
+                shutil.copyfileobj(source, destination)
+            os.replace(temporary, path)
+            temporary = None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    if not path.exists():
+        return False
+
+    actual_size = path.stat().st_size
+    if actual_size > expected_size:
+        _quarantine_model_path(path)
+        return False
+    return actual_size == expected_size
+
+
+def download_hf_group(repo_id, revision, manifest, label):
+    """Download a pinned Hugging Face manifest, skipping or resuming each file."""
+    pending = []
+    for relative_path, expected_size in manifest.items():
+        destination = cfg.model_dir / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if _prepare_model_path(destination, expected_size):
+            info(f"已安装，跳过: {relative_path}")
+        else:
+            pending.append((relative_path, expected_size, destination))
+
+    if not pending:
+        info(f"{label}: 全部已安装，跳过下载")
+        return
+
+    info(f"{label}: 待下载或续传 {len(pending)} 个文件")
+    if not ask("开始下载？"):
+        return
+
+    for relative_path, expected_size, destination in pending:
+        url = (
+            f"https://huggingface.co/{repo_id}/resolve/{revision}/"
+            f"{quote(relative_path, safe='/')}"
+        )
+        info(f"下载/续传: {relative_path}")
+        result = run(
+            [
+                "wget",
+                "--continue",
+                "--tries=10",
+                "--timeout=60",
+                "--read-timeout=60",
+                url,
+            ],
+            cwd=str(destination.parent),
+            timeout=None,
+            check=False,
+        )
+        if result is None or result.returncode != 0:
+            raise RuntimeError(
+                f"下载中断: {relative_path}；请重新运行安装程序以从现有文件续传"
+            )
+
+        actual_size = destination.stat().st_size if destination.exists() else -1
+        if actual_size != expected_size:
+            raise RuntimeError(
+                f"下载完成但大小不符: {relative_path} "
+                f"(预期 {expected_size}，实际 {actual_size})；请重新运行以续传"
+            )
+        info(f"完成: {relative_path} {ok()}")
+
+
 # ═══════════════════════════════════════════════════════════════
 # 公用阶段（两种模式共用）
 # ═══════════════════════════════════════════════════════════════
@@ -223,9 +354,9 @@ def step_python_env():
     run([py, "-m", "pip", "install", "-q", "--no-cache-dir",
          "sageattention==1.0.6", "sqlalchemy", "alembic",
          "pillow", "opencv-python-headless",
-         "huggingface_hub", "modelscope"])
+         "huggingface_hub"])
     try:
-        subprocess.run([py, "-c", "import sageattention, sqlalchemy, modelscope"],
+        subprocess.run([py, "-c", "import sageattention, sqlalchemy, huggingface_hub"],
                        capture_output=True, text=True, check=True)
         info(f"核心依赖 {ok()}")
     except Exception:
@@ -393,55 +524,13 @@ def step_finish():
 # ═══════════════════════════════════════════════════════════════
 
 def scratch_hf_weights():
-    header("下载权重 — HuggingFace 一体包 (~91 GB)")
-    py = str(cfg.python)
-    flag = cfg.model_dir / ".weights_downloaded"
-    cfg.model_dir.mkdir(parents=True, exist_ok=True)
-    if flag.exists():
-        info("已下载，跳过"); scratch_list_models(); return
-
-    items = [
-        ("diffusion_models",    "fl2va+ref2va",  "~40 GB"),
-        ("text_encoders",       "nvFP4",   "~15 GB"),
-        ("text_encoders/H3",    "Heretic", "~32 GB"),
-        ("vae",                 "video+audio", "~5.5 GB"),
-        ("upscale_models",      "ESRGAN",  "~0.1 GB"),
-        ("其他辅助文件",         "",         "~13 GB"),
-    ]
-    info("下载内容:")
-    for cat, detail, size in items:
-        print(f"    {dim('•')} {cat:<22} {dim(detail):<12} {size}")
-    print(f"\n  {bold('总大小: ~91 GB')}")
-    print(f"  {dim('支持断点续传')}")
-    print(f"  {dim('提示：扩散模型 + VAE 也可从 ModelScope 直连下载（国内更快），见 I2V.md 第 4 节。')}\n")
-    if not ask("开始下载？"):
-        print(f"\n  {dim('跳过。')}\n"); return
-
-    info("下载中…")
-    start = time.time()
-    script = f"""
-import os
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
-from huggingface_hub import snapshot_download
-for msg in snapshot_download(
-    "drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights",
-    repo_type="model", local_dir="{cfg.model_dir}",
-    local_dir_use_symlinks=False, resume_download=True,
-):
-    if msg.strip(): print(msg, flush=True)
-"""
-    r = subprocess.run([py, "-c", script], timeout=7200)
-    if r.returncode == 0:
-        flag.touch()
-        info(f"下载完成 ({timedelta(seconds=int(time.time()-start))}) {ok()}")
-    else:
-        info(f"下载可能未完全成功 {warn()}，重新运行可续传")
-    for sub in ["diffusion_models", "text_encoders", "vae", "upscale_models"]:
-        nested = cfg.model_dir / sub / sub
-        if nested.is_dir():
-            for f in nested.iterdir():
-                shutil.move(str(f), str(cfg.model_dir / sub / f.name))
-            nested.rmdir()
+    header("下载权重 — Hugging Face 主模型 (~91 GB)")
+    download_hf_group(
+        HF_BASE_REPO,
+        HF_BASE_REVISION,
+        HF_BASE_MANIFEST,
+        "Hugging Face 主模型",
+    )
     scratch_list_models()
 
 def scratch_list_models():
@@ -453,48 +542,14 @@ def scratch_list_models():
             rel = m.relative_to(cfg.model_dir)
             print(f"    {dim(f'{m.stat().st_size/(1024**3):5.1f} GB')}  {rel}")
 
-def scratch_modelscope():
-    header("下载 ModelScope 补充文本编码器 (~74 GB)")
-    py = str(cfg.python)
-    flag = Path("/root/.cache/modelscope/hub/models/Comfy-Org/MiniMax-H3/.done")
-    if flag.exists():
-        info("已下载，跳过"); scratch_symlink(); return
-    print(f"  {bold('下载:')} INT8-ConvRot (~26 GB) + BF16 (~48 GB)\n")
-    if not ask("开始下载？"):
-        print(f"\n  {dim('跳过。')}\n"); return
-    info("INT8-ConvRot (26 GB)...")
-    start = time.time()
-    run([py, "-c", """
-from modelscope.hub.snapshot_download import snapshot_download
-snapshot_download("Comfy-Org/MiniMax-H3", cache_dir="/root/.cache/modelscope",
-    allow_patterns=["text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"])
-"""])
-    info(f"INT8 {ok()} ({timedelta(seconds=int(time.time()-start))})")
-    info("BF16 (48 GB)...")
-    start = time.time()
-    run([py, "-c", """
-from modelscope.hub.snapshot_download import snapshot_download
-snapshot_download("Comfy-Org/MiniMax-H3", cache_dir="/root/.cache/modelscope",
-    allow_patterns=["text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors"])
-"""])
-    info(f"BF16 {ok()} ({timedelta(seconds=int(time.time()-start))})")
-    flag.parent.mkdir(parents=True, exist_ok=True)
-    flag.touch()
-    scratch_symlink()
-
-def scratch_symlink():
-    info("创建 symlink...")
-    text_enc = cfg.model_dir / "text_encoders"
-    text_enc.mkdir(parents=True, exist_ok=True)
-    cache_root = Path("/root/.cache/modelscope")
-    for pattern in ["qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
-                    "qwen3vl_32b_minimax_h3_bf16.safetensors"]:
-        for src in cache_root.rglob(pattern):
-            dst = text_enc / src.name
-            if not dst.exists():
-                dst.symlink_to(src)
-                info(f"  {src.name} {cyan('→ symlink')}")
-    info(f"symlink {ok()}")
+def scratch_hf_extra_text_encoders():
+    header("下载权重 — Hugging Face 补充文本编码器 (~74 GB)")
+    download_hf_group(
+        HF_EXTRA_REPO,
+        HF_EXTRA_REVISION,
+        HF_EXTRA_MANIFEST,
+        "Hugging Face 补充文本编码器",
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -573,7 +628,7 @@ def clone_rsync_models():
     ssh_opt = f"ssh -o StrictHostKeyChecking=no"
     if cfg.ssh_pass:
         ssh_opt = f"sshpass -p {cfg.ssh_pass} ssh -o StrictHostKeyChecking=no"
-    cmd = ["rsync", "-avz", "--progress", "-e", ssh_opt,
+    cmd = ["rsync", "-aLz", "--progress", "-e", ssh_opt,
            f"root@{rsync_ip}:/root/minnimax-h3/comfy/ComfyUI/models/",
            str(cfg.model_dir) + "/"]
     show_cmd(cmd)
@@ -666,7 +721,7 @@ def step_welcome():
         info(f"命令行指定主节点 {cfg.master_ip}，自动选择 {bold('方案 B: 主节点克隆')}")
     else:
         mode = ask_choice("选择部署方案:", [
-            ("A", "从零部署 — 全部从 HuggingFace / ModelScope 下载 (~165 GB)"),
+            ("A", "从零部署 — 全部从 Hugging Face 下载 (~165 GB)"),
             ("B", "主节点克隆 — 从已部署的 DGX Spark 高速复制 (~5 分钟)"),
         ])
     if mode.lower() == "a":
@@ -728,7 +783,7 @@ def main():
             step_python_env()
             step_comfyui_and_nodes()
             scratch_hf_weights()        # A 专属
-            scratch_modelscope()        # A 专属
+            scratch_hf_extra_text_encoders()  # A 专属
             step_start_comfyui()
 
         step_finish()
