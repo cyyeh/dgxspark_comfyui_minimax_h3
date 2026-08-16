@@ -628,7 +628,7 @@ def clone_rsync_models():
     ssh_opt = f"ssh -o StrictHostKeyChecking=no"
     if cfg.ssh_pass:
         ssh_opt = f"sshpass -p {cfg.ssh_pass} ssh -o StrictHostKeyChecking=no"
-    cmd = ["rsync", "-avz", "--progress", "-e", ssh_opt,
+    cmd = ["rsync", "-aLz", "--progress", "-e", ssh_opt,
            f"root@{rsync_ip}:/root/minnimax-h3/comfy/ComfyUI/models/",
            str(cfg.model_dir) + "/"]
     show_cmd(cmd)

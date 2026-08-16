@@ -20,7 +20,6 @@ RESERVE_VRAM="${RESERVE_VRAM:-8}"
 
 # 源目录 (当前机器)
 SOURCE_DIR="/root/minnimax-h3"
-MODELSCOPE_CACHE="/root/.cache/modelscope/models/Comfy-Org--MiniMax-H3"
 LOCAL_ROCE_IP="${4:?用法: $0 <管理IP> <RoCE_IP> <密码> <本机RoCE_IP>}"
 
 # ── 颜色 ──────────────────────────────────────────
@@ -93,42 +92,20 @@ info "阶段 3/5: 同步项目文件 (RoCE)..."
 do_ssh "mkdir -p ${REMOTE_DIR} ${REMOTE_DIR}/logs"
 
 # 3a: 项目主体 (ComfyUI + 模型 + 脚本 + 工作流)
-info "  3a: 项目主体..."
-rsync -a --info=progress2 \
+info "  项目主体（模型链接会转换为实体文件）..."
+rsync -aL --info=progress2 \
   -e "${RSYNC_SSH}" \
   --exclude='.git' --exclude='__pycache__' --exclude='cache_hf' \
   "${SOURCE_DIR}/" \
   "root@${ROCE_IP}:${REMOTE_DIR}/" || error "rsync 项目失败"
 info "  项目主体 OK"
 
-# 3b: ModelScope 缓存 (文本编码器 88GB)
-info "  3b: ModelScope 缓存 (88GB)..."
-do_ssh "mkdir -p ${MODELSCOPE_CACHE}/snapshots/master/text_encoders"
-rsync -a --info=progress2 \
-  -e "${RSYNC_SSH}" \
-  "${MODELSCOPE_CACHE}/snapshots/master/text_encoders/" \
-  "root@${ROCE_IP}:${MODELSCOPE_CACHE}/snapshots/master/text_encoders/" || error "rsync ModelScope 失败"
-info "  ModelScope 缓存 OK"
-
 # ──────────────────────────────────────────────────
-# 阶段 4: 配置 + 修 symlink
+# 阶段 4: 配置 + 验证模型
 # ──────────────────────────────────────────────────
 info "阶段 4/5: 配置模型路径..."
 
 do_ssh "
-  # 清理可能残留的坏 symlink
-  rm -f ${REMOTE_DIR}/comfy/ComfyUI/models/text_encoders/qwen3vl_32b_minimax_h3_*.safetensors
-
-  # 创建文本编码器 symlink (指向 ModelScope 缓存)
-  SRC=${MODELSCOPE_CACHE}/snapshots/master/text_encoders
-  DST=${REMOTE_DIR}/comfy/ComfyUI/models/text_encoders
-  for f in qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors \
-           qwen3vl_32b_minimax_h3_int8_convrot.safetensors \
-           qwen3vl_32b_minimax_h3_bf16.safetensors; do
-    ln -sf \"\${SRC}/\${f}\" \"\${DST}/\${f}\"
-  done
-  echo 'Symlinks OK'
-
   # 安装 ComfyUI requirements
   cd ${REMOTE_DIR}/comfy/ComfyUI
   ${VENV_DIR}/bin/pip install -q -r requirements.txt 2>&1 | tail -1

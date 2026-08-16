@@ -2,15 +2,15 @@
 # ============================================================
 # MiniMax H3 + keys-heretic 从零部署脚本 v2
 # DGX Spark (GB10) — 不需要任何本地缓存或主节点
-# 所有内容从 GitHub / HuggingFace / ModelScope 下载
+# 所有模型从 Hugging Face 下载
 #
 # 用法:
 #   bash deploy_from_scratch.sh
 #   PROXY=http://your-proxy:port bash deploy_from_scratch.sh   # 如需要
 #
 # 下载总量: ~165GB
-#   - HF 权重一体包:  ~91GB  (drowzeys/keys-heretic-...-weights)
-#   - ModelScope TE:   ~74GB  (INT8-ConvRot + BF16)
+#   - HF 主模型:       ~91GB  (drowzeys/keys-heretic-...-weights)
+#   - HF 补充 TE:      ~74GB  (INT8-ConvRot + BF16)
 #   - Git repos:        ~1GB
 # ============================================================
 set -euo pipefail
@@ -21,6 +21,7 @@ VENV_DIR="${VENV_DIR:-/opt/minnimax-h3-venv}"
 COMFY_PORT="${COMFY_PORT:-8188}"
 RESERVE_VRAM="${RESERVE_VRAM:-8}"
 PROXY="${PROXY:-}"
+MODEL_DIR="${MODEL_DIR:-${INSTALL_DIR}/comfy/ComfyUI/models}"
 if [ -n "$PROXY" ]; then
     export http_proxy="$PROXY" https_proxy="$PROXY"
     export HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY"
@@ -32,6 +33,92 @@ info()  { echo -e "${GREEN}[+]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
 error() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 step()  { echo -e "\n${CYAN}━━━ $* ━━━${NC}"; }
+
+# ── Hugging Face 模型下载 ─────────────────────────
+file_size() {
+    python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_size)' "$1"
+}
+
+quarantine_model_path() {
+    local path="$1" candidate="${1}.invalid" index=1
+    while [ -e "$candidate" ] || [ -L "$candidate" ]; do
+        candidate="${path}.invalid.${index}"
+        index=$((index + 1))
+    done
+    mv "$path" "$candidate"
+    warn "隔离异常文件: $(basename "$path") → $(basename "$candidate")"
+}
+
+prepare_model_path() {
+    local path="$1" expected_size="$2" actual_size temporary
+
+    if [ -L "$path" ]; then
+        if [ ! -e "$path" ]; then
+            quarantine_model_path "$path"
+            return 1
+        fi
+        actual_size=$(file_size "$path")
+        if [ "$actual_size" -gt "$expected_size" ]; then
+            quarantine_model_path "$path"
+            return 1
+        fi
+        temporary=$(mktemp "$(dirname "$path")/$(basename "$path").materializing.XXXXXX")
+        if ! cp "$path" "$temporary"; then
+            rm -f "$temporary"
+            warn "无法实体化旧模型链接: $path"
+            return 2
+        fi
+        if ! mv -f "$temporary" "$path"; then
+            rm -f "$temporary"
+            warn "无法替换旧模型链接: $path"
+            return 2
+        fi
+    fi
+
+    [ -f "$path" ] || return 1
+    actual_size=$(file_size "$path")
+    if [ "$actual_size" -gt "$expected_size" ]; then
+        quarantine_model_path "$path"
+        return 1
+    fi
+    [ "$actual_size" -eq "$expected_size" ]
+}
+
+download_hf_file() {
+    local repo_id="$1" revision="$2" relative_path="$3" expected_size="$4"
+    local destination="${MODEL_DIR}/${relative_path}" destination_dir status actual_size
+    destination_dir=$(dirname "$destination")
+    mkdir -p "$destination_dir"
+
+    if prepare_model_path "$destination" "$expected_size"; then
+        info "已安装，跳过: ${relative_path}"
+        return 0
+    else
+        status=$?
+        [ "$status" -ne 2 ] || return 1
+    fi
+
+    info "下载/续传: ${relative_path}"
+    if ! (
+        cd "$destination_dir"
+        wget --continue --tries=0 --timeout=60 --read-timeout=60 \
+            "https://huggingface.co/${repo_id}/resolve/${revision}/${relative_path}"
+    ); then
+        warn "下载中断: ${relative_path}；请重新运行安装程序以从现有文件续传"
+        return 1
+    fi
+
+    if [ ! -f "$destination" ]; then
+        warn "下载完成但找不到文件: ${relative_path}；请重新运行以续传"
+        return 1
+    fi
+    actual_size=$(file_size "$destination")
+    if [ "$actual_size" -ne "$expected_size" ]; then
+        warn "下载完成但大小不符: ${relative_path}（预期 ${expected_size}，实际 ${actual_size}）；请重新运行以续传"
+        return 1
+    fi
+    info "完成: ${relative_path}"
+}
 
 # ── 前置检查 ──────────────────────────────────────
 check() {
@@ -57,7 +144,6 @@ main() {
     # ── 目录初始化 ──
     mkdir -p "${INSTALL_DIR}/logs"
     COMFY="${INSTALL_DIR}/comfy/ComfyUI"
-    MODEL_DIR="${COMFY}/models"
     CN="${COMFY}/custom_nodes"
 
     # ── 阶段 1: 系统依赖 ──
@@ -84,8 +170,8 @@ main() {
         sageattention==1.0.6 \
         sqlalchemy alembic \
         pillow mss opencv-python-headless \
-        huggingface_hub modelscope 2>&1 | tail -1
-    $PY -c "import sageattention, sqlalchemy, modelscope" && info "核心依赖 OK" || \
+        huggingface_hub 2>&1 | tail -1
+    $PY -c "import sageattention, sqlalchemy, huggingface_hub" && info "核心依赖 OK" || \
         error "核心依赖安装失败"
 
     # ── 阶段 3: ComfyUI + 自定义节点 ──
@@ -151,101 +237,55 @@ PYEOF
     info "工作流: $(ls ${WORKFLOWS}/*.json 2>/dev/null | wc -l) 个"
     rm -rf "$TMP"
 
-    # ── 阶段 4: HF 权重一体包 ──
-    step "阶段 4/6: 下载权重 — HuggingFace 一体包 (~91GB)"
-    mkdir -p "${MODEL_DIR}"  # 创建 models 目录以接收 hf download
+    # ── 阶段 4: Hugging Face 主模型 ──
+    step "阶段 4/6: 下载权重 — Hugging Face 主模型 (~91GB)"
+    mkdir -p "${MODEL_DIR}"
+    HF_BASE_REPO="drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights"
+    HF_BASE_REVISION="2e4f1dbbbc3b42a6c92ac685aa5c4a060c32b05e"
 
-    HF_WEIGHTS="drowzeys/keys-heretic-MiniMax-H3-sol-engine-more-DGX-Spark-weights"
-    FLAG_FILE="${MODEL_DIR}/.weights_downloaded"
-
-    if [ -f "$FLAG_FILE" ]; then
-        info "HF 权重已下载，跳过"
-    else
-        info "下载中...（约 91GB，请耐心等待，可 Ctrl+C 中断后重新运行续传）"
-        echo ""
-        echo "  ┌──────────────────────────────────────────┐"
-        echo "  │  下载内容：                                │"
-        echo "  │  • diffusion_models (fl2va+ref2va)  ~40 GB  │"
-        echo "  │  • text_encoders (nvFP4)      ~15 GB       │"
-        echo "  │  • text_encoders/H3 (Heretic)  ~32 GB      │"
-        echo "  │  • vae (video + audio)         ~5.5 GB     │"
-        echo "  │  • upscale_models (ESRGAN)     ~0.1 GB     │"
-        echo "  │  • 其他辅助文件                ~13 GB      │"
-        echo "  └──────────────────────────────────────────┘"
-        echo ""
-        info "提示：扩散模型 + VAE（fl2va/ref2va 各 20GB、video/audio VAE）"
-        info "      也可从 ModelScope 直连下载（国内更快、无需代理），见 I2V.md 第 4 节。"
-
-        $PY -m huggingface_hub.cli.hf download "${HF_WEIGHTS}" \
-            --repo-type model \
-            --local-dir "${MODEL_DIR}" \
-            --local-dir-use-symlinks False 2>&1 && \
-            touch "$FLAG_FILE" || error "HF 权重下载失败，请检查网络或设置 PROXY=... 后重试"
-    fi
-
-    # 展平可能的目录嵌套 (hf download 有时会造出 xxx/xxx/)
-    for sub in diffusion_models text_encoders vae upscale_models; do
-        if [ -d "${MODEL_DIR}/${sub}/${sub}" ]; then
-            mv "${MODEL_DIR}/${sub}/${sub}/"* "${MODEL_DIR}/${sub}/" 2>/dev/null || true
-            rmdir "${MODEL_DIR}/${sub}/${sub}" 2>/dev/null || true
-        fi
-    done
-    info "HF 权重一体包 OK"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors" 20970379616 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors" 20970379616 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "text_encoders/H3/qwen3vl_32b_h3_generation_tail_50_63_int8_convrot.safetensors" 7609128707 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "text_encoders/H3/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors" 26363476151 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" 15687142551 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "upscale_models/RealESRGAN_x2plus.pth" 67061725 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "upscale_models/RealESRGAN_x4plus.pth" 67040989 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "vae/minimax_h3_audio_vae_fp32.safetensors" 605254808 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_BASE_REPO" "$HF_BASE_REVISION" \
+        "vae/minimax_h3_video_vae_fp16.safetensors" 5207808496 || \
+        error "主模型下载未完成；重新运行脚本可续传"
+    info "Hugging Face 主模型 OK"
     find "${MODEL_DIR}" -name "*.safetensors" -o -name "*.pth" | \
         while read f; do echo "    $(du -h "$f" | cut -f1) $f"; done
 
-    # ── 阶段 5: ModelScope 补充文本编码器 ──
-    step "阶段 5/6: 下载补充文本编码器 — ModelScope (~74GB)"
+    # ── 阶段 5: Hugging Face 补充文本编码器 ──
+    step "阶段 5/6: 下载补充文本编码器 — Hugging Face (~74GB)"
+    HF_EXTRA_REPO="Comfy-Org/MiniMax-H3"
+    HF_EXTRA_REVISION="d07f69bc8fa09c9717e1e47180034f9322e0e54d"
 
-    MSC_ROOT="/root/.cache/modelscope/hub/models/Comfy-Org/MiniMax-H3"
-    MSC_FLAG="${MSC_ROOT}/.done"
-
-    if [ -f "$MSC_FLAG" ]; then
-        info "ModelScope 文本编码器已下载，跳过"
-    else
-        info "下载中...（约 74GB: INT8-ConvRot 26GB + BF16 48GB）"
-        $PY << 'PYEOF'
-from modelscope.hub.snapshot_download import snapshot_download
-import os
-
-dst = "/root/.cache/modelscope/hub/models/Comfy-Org/MiniMax-H3"
-os.makedirs(dst, exist_ok=True)
-
-print("Downloading INT8-ConvRot text encoder (26 GB)...")
-snapshot_download(
-    "Comfy-Org/MiniMax-H3",
-    cache_dir="/root/.cache/modelscope",
-    allow_patterns=["text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"],
-)
-
-print("Downloading BF16 text encoder (48 GB)...")
-snapshot_download(
-    "Comfy-Org/MiniMax-H3",
-    cache_dir="/root/.cache/modelscope",
-    allow_patterns=["text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors"],
-)
-
-open(os.path.join(dst, ".done"), "w").close()
-print("ModelScope text encoders download complete")
-PYEOF
-    fi
-
-    # 创建 symlink
-    info "创建 symlink..."
-    # ModelScope 实际存储路径
-    MSC_FILES=$(find /root/.cache/modelscope -name "qwen3vl_32b_minimax_h3_int8_convrot.safetensors" \
-                                        -o -name "qwen3vl_32b_minimax_h3_bf16.safetensors" 2>/dev/null)
-    TEXT_ENC_DIR="${MODEL_DIR}/text_encoders"
-    mkdir -p "$TEXT_ENC_DIR"
-
-    for f in $MSC_FILES; do
-        base=$(basename "$f")
-        if [ ! -e "${TEXT_ENC_DIR}/${base}" ]; then
-            ln -sf "$f" "${TEXT_ENC_DIR}/${base}"
-            info "  ${base} → symlink"
-        fi
-    done
-    info "ModelScope 文本编码器 OK"
+    download_hf_file "$HF_EXTRA_REPO" "$HF_EXTRA_REVISION" \
+        "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors" 27141342152 || \
+        error "补充文本编码器下载未完成；重新运行脚本可续传"
+    download_hf_file "$HF_EXTRA_REPO" "$HF_EXTRA_REVISION" \
+        "text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors" 51506295256 || \
+        error "补充文本编码器下载未完成；重新运行脚本可续传"
+    info "Hugging Face 补充文本编码器 OK"
 
     # ── 阶段 6: 启动 ComfyUI ──
     step "阶段 6/6: 启动 ComfyUI"
@@ -325,4 +365,6 @@ STATUSEOP
     echo "    4. 修改 Node #104 prompt → Queue Prompt"
 }
 
-main
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi
